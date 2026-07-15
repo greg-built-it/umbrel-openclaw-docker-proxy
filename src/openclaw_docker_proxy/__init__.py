@@ -133,9 +133,11 @@ async def assert_docker_api_compatible(client: httpx.AsyncClient) -> None:
         raise RuntimeError("docker_api_incompatible")
 
 
-def _version_in_range(version: str, min_version: str | None, max_version: str | None) -> bool:
+def _version_in_range(version: str | None, min_version: str | None, max_version: str | None) -> bool:
     """Numeric tuple comparison of Docker API versions."""
     vt = _version_to_tuple(version)
+    if vt is None:
+        return False
     if min_version is not None and vt < _version_to_tuple(min_version):
         return False
     if max_version is not None and vt > _version_to_tuple(max_version):

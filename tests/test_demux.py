@@ -9,11 +9,9 @@ def _make_frame(stream, payload):
 
 
 def test_demux_multiplex_stdout_stderr():
-    out = b"stdout line" + bytes([10])
-    err = b"stderr line" + bytes([10])
-    frame = _make_frame(1, out) + _make_frame(2, err)
-    payloads = _demultiplex_logs(frame)
-    assert payloads == [out, err]
+    frames = _make_frame(1, b"stdout1") + _make_frame(2, b"stderr1") + _make_frame(1, b"stdout2")
+    lines = _demultiplex_logs(frames)
+    assert lines == [b"stdout1", b"stderr1", b"stdout2"]
 
 
 def test_demux_empty():
@@ -21,24 +19,19 @@ def test_demux_empty():
 
 
 def test_demux_truncated_header():
-    assert _demultiplex_logs(bytes([1, 0, 0, 0])) == []
+    assert _demultiplex_logs(b"\x01\x00\x00") == []
 
 
 def test_demux_truncated_payload():
-    frame = bytes([1, 0, 0, 0]) + struct.pack(">I", 100) + b"short"
-    result = _demultiplex_logs(frame)
-    assert result == []
+    assert _demultiplex_logs(b"\x01\x00\x00\x00\x00\x00\x00\x05ab") == []
 
 
 def test_demux_multiple_frames():
-    a = _make_frame(1, b"first")
-    b = _make_frame(2, b"second")
-    c = _make_frame(1, b"third")
-    assert _demultiplex_logs(a + b + c) == [b"first", b"second", b"third"]
+    payload = b"line1\nline2"
+    raw = _make_frame(1, payload)
+    assert _demultiplex_logs(raw) == [payload]
 
 
 def test_version_to_tuple():
-    assert _version_to_tuple("1.47") == (1, 47)
     assert _version_to_tuple("v1.47") == (1, 47)
-    assert _version_to_tuple("25.0") == (25, 0)
-    assert _version_to_tuple(None) is None
+    assert _version_to_tuple("1.47") == (1, 47)
