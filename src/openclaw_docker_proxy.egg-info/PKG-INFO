@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: openclaw-docker-proxy
+Version: 1.0.3
+Summary: Minimal Docker-API proxy for OpenClaw diagnostics
+Requires-Python: >=3.13
+Requires-Dist: starlette==0.46.2
+Requires-Dist: uvicorn==0.34.2
+Requires-Dist: httpx==0.28.1
