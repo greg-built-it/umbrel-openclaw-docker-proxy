@@ -108,7 +108,9 @@ def create_unix_socket() -> socket.socket:
     return sock
 
 
-def _version_to_tuple(version: str) -> tuple:
+def _version_to_tuple(version: str | None) -> tuple | None:
+    if version is None:
+        return None
     version = version.lstrip("v")
     return tuple(int(x) for x in version.split("."))
 
@@ -127,8 +129,18 @@ async def assert_docker_api_compatible(client: httpx.AsyncClient) -> None:
     if not api_version or not min_api_version:
         raise RuntimeError("docker_api_incompatible")
 
-    if not (min_api_version <= expected <= api_version):
+    if not _version_in_range(expected, min_api_version, api_version):
         raise RuntimeError("docker_api_incompatible")
+
+
+def _version_in_range(version: str, min_version: str | None, max_version: str | None) -> bool:
+    """Numeric tuple comparison of Docker API versions."""
+    vt = _version_to_tuple(version)
+    if min_version is not None and vt < _version_to_tuple(min_version):
+        return False
+    if max_version is not None and vt > _version_to_tuple(max_version):
+        return False
+    return True
 
 
 @asynccontextmanager
