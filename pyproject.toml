@@ -9,16 +9,12 @@ dependencies = [
     "httpx==0.28.1",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
-
-[build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
-
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
