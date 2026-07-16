@@ -1,6 +1,6 @@
 [project]
 name = "openclaw-docker-proxy"
-version = "1.0.3"
+version = "1.0.4"
 description = "Minimal Docker-API proxy for OpenClaw diagnostics"
 requires-python = ">=3.13"
 dependencies = [
