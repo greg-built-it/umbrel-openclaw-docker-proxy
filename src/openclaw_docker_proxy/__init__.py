@@ -18,6 +18,7 @@ from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Route
 
 SOCK_DIR = Path("/run/proxy")
 SOCK_PATH = SOCK_DIR / "docker-proxy.sock"
@@ -616,10 +617,10 @@ async def resource_status(request: Request):
 
 
 routes = [
-    {"path": "/health", "endpoint": health, "methods": ["GET"]},
-    {"path": "/v1/container_status", "endpoint": container_status, "methods": ["POST"]},
-    {"path": "/v1/logs", "endpoint": logs, "methods": ["POST"]},
-    {"path": "/v1/resource_status", "endpoint": resource_status, "methods": ["POST"]},
+    Route("/health", health, methods=["GET"]),
+    Route("/v1/container_status", container_status, methods=["POST"]),
+    Route("/v1/logs", logs, methods=["POST"]),
+    Route("/v1/resource_status", resource_status, methods=["POST"]),
 ]
 
 app = Starlette(routes=routes, lifespan=lifespan)

@@ -2,6 +2,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
+from starlette.routing import Route
 
 from openclaw_docker_proxy import (
     _docker_error_response,
@@ -11,6 +12,7 @@ from openclaw_docker_proxy import (
     DOCKER_API_VERSION,
     DOCKER_TOTAL_TIMEOUT,
     DOCKER_SOCKET_PATH,
+    routes,
 )
 
 
@@ -82,3 +84,13 @@ async def test_stream_with_limit_respects_total_size():
         async for chunk in _stream_with_limit(FakeClient(), sem, "GET", "/x", 80):
             chunks.append(chunk)
     assert sum(len(c) for c in chunks) <= 80
+
+
+def test_starlette_routes_are_executable_and_contract_is_post_only():
+    assert all(isinstance(route, Route) for route in routes)
+    contract = {route.path: route.methods for route in routes}
+
+    assert contract["/health"] == {"GET", "HEAD"}
+    assert contract["/v1/container_status"] == {"POST"}
+    assert contract["/v1/logs"] == {"POST"}
+    assert contract["/v1/resource_status"] == {"POST"}
