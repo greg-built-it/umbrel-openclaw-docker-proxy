@@ -351,9 +351,17 @@ async def _get_docker_json(
 
 
 OPENCLAW_REPOSITORY_PREFIXES = (
-    "ghcr.io/getumbrel/openclaw",
+    "ghcr.io/getumbrel/openclaw-umbrel",
 )
 MAX_IMAGE_RESULTS = 100
+
+
+def _openclaw_reference_filters() -> list[str]:
+    return [
+        f"{repository}{suffix}"
+        for repository in OPENCLAW_REPOSITORY_PREFIXES
+        for suffix in (":*", "@*")
+    ]
 
 
 def _is_openclaw_reference(reference: object) -> bool:
@@ -420,7 +428,7 @@ def _filter_local_images(images: list[dict], max_results: int = MAX_IMAGE_RESULT
 
 async def _get_local_images(client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> dict:
     filters = json.dumps(
-        {"reference": [prefix + "*" for prefix in OPENCLAW_REPOSITORY_PREFIXES]},
+        {"reference": _openclaw_reference_filters()},
         separators=(",", ":"),
         sort_keys=True,
     )
@@ -456,24 +464,53 @@ def _filter_image_config(inspect_data: dict) -> dict:
     }
 
 
+def _allowed_image_references_for_image(image: dict) -> set[str]:
+    if not _is_openclaw_image(image):
+        return set()
+
+    repo_tags = {
+        ref for ref in (image.get("RepoTags") or []) if _is_openclaw_reference(ref)
+    }
+    repo_digests = {
+        ref
+        for ref in (image.get("RepoDigests") or [])
+        if _is_openclaw_reference(ref)
+    }
+    references = repo_tags | repo_digests
+    for tag in repo_tags:
+        for digest in repo_digests:
+            digest_value = digest.split("@", 1)[1]
+            references.add(f"{tag}@{digest_value}")
+
+    raw_id = image.get("Id")
+    normalized_id = _normalize_image_id(raw_id)
+    if isinstance(raw_id, str) and re.fullmatch(r"sha256:[a-fA-F0-9]{64}", raw_id):
+        references.add(raw_id.lower())
+    if normalized_id and re.fullmatch(r"[a-f0-9]{64}", normalized_id):
+        references.add(normalized_id)
+    return references
+
+
 def _allowed_image_references(images: list[dict]) -> set[str]:
     references: set[str] = set()
     for image in images:
-        if not _is_openclaw_image(image):
-            continue
-        references.update(
-            ref for ref in (image.get("RepoTags") or []) if _is_openclaw_reference(ref)
-        )
-        references.update(
-            ref for ref in (image.get("RepoDigests") or []) if _is_openclaw_reference(ref)
-        )
-        raw_id = image.get("Id")
-        normalized_id = _normalize_image_id(raw_id)
-        if isinstance(raw_id, str) and re.fullmatch(r"sha256:[a-fA-F0-9]{64}", raw_id):
-            references.add(raw_id.lower())
-        if normalized_id and re.fullmatch(r"[a-f0-9]{64}", normalized_id):
-            references.add(normalized_id)
+        references.update(_allowed_image_references_for_image(image))
     return references
+
+
+def _allowed_local_image_id(images: list[dict], image_ref: str) -> str | None:
+    candidate = image_ref.lower() if re.fullmatch(
+        r"(?:sha256:)?[a-fA-F0-9]{64}", image_ref
+    ) else image_ref
+    for image in images:
+        if candidate not in _allowed_image_references_for_image(image):
+            continue
+        raw_id = image.get("Id")
+        if isinstance(raw_id, str) and re.fullmatch(
+            r"sha256:[a-fA-F0-9]{64}", raw_id
+        ):
+            return raw_id.lower()
+    return None
 
 
 async def _get_image_config(
@@ -483,7 +520,9 @@ async def _get_image_config(
 ) -> dict:
     deadline = _new_deadline()
     filters = json.dumps(
-        {"reference": [image_ref]}, separators=(",", ":"), sort_keys=True
+        {"reference": _openclaw_reference_filters()},
+        separators=(",", ":"),
+        sort_keys=True,
     )
     listing_path = _docker_path("images", "json") + "?filters=" + quote(
         filters, safe=""
@@ -497,9 +536,10 @@ async def _get_image_config(
     )
     if not isinstance(images, list):
         raise RuntimeError("invalid_docker_response")
-    if image_ref not in _allowed_image_references(images):
+    local_image_id = _allowed_local_image_id(images, image_ref)
+    if local_image_id is None:
         raise RuntimeError("image_not_allowed")
-    encoded_ref = quote(image_ref, safe="")
+    encoded_ref = quote(local_image_id, safe="")
     path = _docker_path("images", encoded_ref, "json")
     data = await _get_docker_json(
         client,

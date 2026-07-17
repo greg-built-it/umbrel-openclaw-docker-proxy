@@ -8,16 +8,26 @@ from starlette.routing import Route
 import openclaw_docker_proxy as proxy
 
 
-PREFIX = "ghcr.io/getumbrel/openclaw"
+PREFIX = "ghcr.io/getumbrel/openclaw-umbrel"
 
 
-def _image(index: int, *, allowed: bool = True) -> dict:
+def _image(
+    index: int,
+    *,
+    allowed: bool = True,
+    repo_tags: list[str] | None = None,
+    repo_digests: list[str] | None = None,
+) -> dict:
     repository = PREFIX if allowed else "example.invalid/foreign"
     digest = f"{index:064x}"[-64:]
     return {
         "Id": f"sha256:{digest}",
-        "RepoTags": [f"{repository}:{index}"],
-        "RepoDigests": [f"{repository}@sha256:{digest}"],
+        "RepoTags": [f"{repository}:{index}"] if repo_tags is None else repo_tags,
+        "RepoDigests": (
+            [f"{repository}@sha256:{digest}"]
+            if repo_digests is None
+            else repo_digests
+        ),
         "Size": index,
         "Created": index,
     }
@@ -31,6 +41,72 @@ def test_local_images_filters_foreign_references_and_preserves_digest():
     assert result["images"][0]["id"] == f"{1:064x}"
     serialized = json.dumps(result)
     assert "example.invalid" not in serialized
+
+
+def test_local_images_accepts_digest_only_with_null_or_empty_repo_tags():
+    digest_only_null = _image(3, repo_tags=None)
+    digest_only_null["RepoTags"] = None
+    digest_only_empty = _image(4, repo_tags=[])
+
+    result = proxy._filter_local_images([digest_only_null, digest_only_empty])
+
+    assert result["count"] == 2
+    assert result["images"][0]["repo_tags"] == []
+    assert result["images"][1]["repo_tags"] == []
+    assert result["images"][0]["repo_digests"] == [
+        f"{PREFIX}@sha256:{3:064x}"
+    ]
+
+
+def test_local_images_accepts_tag_only_and_preserves_multiple_allowed_references():
+    tag_only = _image(5, repo_digests=[])
+    multiple = _image(
+        6,
+        repo_tags=[f"{PREFIX}:stable", f"{PREFIX}:2026.7.1-1"],
+        repo_digests=[f"{PREFIX}@sha256:{6:064x}"],
+    )
+
+    result = proxy._filter_local_images([tag_only, multiple])
+
+    assert result["count"] == 2
+    assert result["images"][0]["repo_digests"] == []
+    assert result["images"][1]["repo_tags"] == [
+        f"{PREFIX}:stable",
+        f"{PREFIX}:2026.7.1-1",
+    ]
+
+
+def test_repository_boundary_rejects_similarly_named_foreign_repository():
+    similar = _image(
+        7,
+        repo_tags=[f"{PREFIX}-evil:latest"],
+        repo_digests=[f"{PREFIX}-evil@sha256:{7:064x}"],
+    )
+
+    assert proxy._filter_local_images([similar])["count"] == 0
+
+
+def test_allowed_references_include_tag_digest_and_full_local_id():
+    image = _image(8)
+    tag = image["RepoTags"][0]
+    digest = image["RepoDigests"][0].split("@", 1)[1]
+
+    references = proxy._allowed_image_references([image])
+
+    assert tag in references
+    assert image["RepoDigests"][0] in references
+    assert f"{tag}@{digest}" in references
+    assert image["Id"] in references
+    assert image["Id"].removeprefix("sha256:") in references
+
+
+def test_foreign_image_id_is_not_authorized():
+    foreign = _image(9, allowed=False)
+
+    references = proxy._allowed_image_references([foreign])
+
+    assert foreign["Id"] not in references
+    assert foreign["Id"].removeprefix("sha256:") not in references
 
 
 def test_local_images_exact_limit_is_not_truncated_but_lookahead_is():
@@ -93,7 +169,7 @@ def test_container_inspect_strips_env_and_label_values_and_bounds_collections():
 
 
 @pytest.mark.asyncio
-async def test_local_images_uses_encoded_docker_reference_filter():
+async def test_local_images_uses_exact_repository_docker_filters():
     getter = AsyncMock(return_value=[])
     with patch.object(proxy, "_get_docker_json", getter):
         await proxy._get_local_images(object(), object())
@@ -101,7 +177,37 @@ async def test_local_images_uses_encoded_docker_reference_filter():
     path = getter.await_args.args[2]
     assert path.startswith("/v1.47/images/json?filters=")
     decoded = json.loads(unquote(path.split("=", 1)[1]))
-    assert decoded == {"reference": [f"{PREFIX}*"]}
+    assert decoded == {"reference": [f"{PREFIX}:*", f"{PREFIX}@*"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reference_kind", ["tag", "digest", "tag_digest", "id", "bare_id"])
+async def test_image_config_authorizes_each_local_reference_and_inspects_by_local_id(
+    reference_kind,
+):
+    image = _image(10)
+    tag = image["RepoTags"][0]
+    digest = image["RepoDigests"][0]
+    references = {
+        "tag": tag,
+        "digest": digest,
+        "tag_digest": f"{tag}@{digest.split('@', 1)[1]}",
+        "id": image["Id"],
+        "bare_id": image["Id"].removeprefix("sha256:"),
+    }
+    getter = AsyncMock(side_effect=[[image], {"Config": {"Env": []}}])
+
+    with patch.object(proxy, "_get_docker_json", getter):
+        await proxy._get_image_config(
+            object(), object(), references[reference_kind]
+        )
+
+    listing_path = getter.await_args_list[0].args[2]
+    decoded = json.loads(unquote(listing_path.split("=", 1)[1]))
+    assert decoded == {"reference": [f"{PREFIX}:*", f"{PREFIX}@*"]}
+    assert getter.await_args_list[1].args[2] == (
+        f"/v1.47/images/{image['Id'].replace(':', '%3A')}/json"
+    )
 
 
 @pytest.mark.asyncio
