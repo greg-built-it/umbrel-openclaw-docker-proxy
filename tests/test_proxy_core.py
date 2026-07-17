@@ -27,9 +27,9 @@ def test_docker_path_builds_correctly():
     assert _docker_path("containers", "openclaw_gateway_1", "logs") == "/v1.47/containers/openclaw_gateway_1/logs"
 
 
-def test_total_timeout_is_15s():
+def test_total_timeout_is_12s():
     import openclaw_docker_proxy as mod
-    assert mod.DOCKER_TOTAL_TIMEOUT == 15.0
+    assert mod.DOCKER_TOTAL_TIMEOUT == 12.0
 
 
 @pytest.mark.asyncio
